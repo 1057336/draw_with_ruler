@@ -1,0 +1,370 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Web Canvas Paint</title>
+    <style>
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        }
+
+        body {
+            background-color: #f5f5f7;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            height: 100vh;
+            overflow: hidden;
+        }
+
+        /* 툴바 스타일 */
+        #toolbar {
+            display: flex;
+            flex-wrap: wrap;
+            align-items: center;
+            gap: 15px;
+            background-color: #ffffff;
+            padding: 12px 24px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.05);
+            width: 100%;
+            z-index: 10;
+        }
+
+        .control-group {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            border-right: 1px solid #e0e0e0;
+            padding-right: 15px;
+        }
+
+        .control-group:last-child {
+            border-right: none;
+        }
+
+        label {
+            font-size: 13px;
+            font-weight: 600;
+            color: #4a4a4a;
+        }
+
+        button {
+            background-color: #ececec;
+            border: none;
+            padding: 8px 14px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-weight: 500;
+            transition: all 0.2s ease;
+        }
+
+        button:hover {
+            background-color: #e0e0e0;
+        }
+
+        button.active {
+            background-color: #007aff;
+            color: white;
+        }
+
+        button#btn-remove {
+            background-color: #ff3b30;
+            color: white;
+        }
+
+        button#btn-remove:hover {
+            background-color: #d62f26;
+        }
+
+        input[type="range"] {
+            width: 80px;
+            cursor: pointer;
+        }
+
+        input[type="color"] {
+            border: none;
+            width: 32px;
+            height: 32px;
+            border-radius: 50%;
+            cursor: pointer;
+            background: none;
+        }
+
+        input[type="text"] {
+            width: 80px;
+            padding: 6px;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+            font-family: monospace;
+            text-align: center;
+        }
+
+        /* 파일 내보내기/가져오기 버튼 디자인 */
+        .file-label {
+            background-color: #34c759;
+            color: white;
+            padding: 8px 14px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 13px;
+            font-weight: 500;
+        }
+
+        .file-label:hover {
+            background-color: #28a745;
+        }
+
+        #file-load {
+            display: none;
+        }
+
+        /* 캔버스 영역 */
+        #canvas-container {
+            flex: 1;
+            width: 100%;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            padding: 20px;
+            background-color: #e5e5e7;
+        }
+
+        canvas {
+            background-color: #ffffff;
+            box-shadow: 0 10px 25px rgba(0,0,0,0.1);
+            border-radius: 8px;
+            display: block;
+            cursor: crosshair;
+        }
+    </style>
+</head>
+<body>
+
+    <div id="toolbar">
+        <div class="control-group">
+            <button id="btn-pen" class="active">Pen</button>
+            <label for="slider-pen">Size</label>
+            <input type="range" id="slider-pen" min="1" max="50" value="5">
+        </div>
+
+        <div class="control-group">
+            <button id="btn-eraser">Eraser</button>
+            <label for="slider-eraser">Size</label>
+            <input type="range" id="slider-eraser" min="1" max="100" value="20">
+        </div>
+
+        <div class="control-group">
+            <label>Color</label>
+            <input type="color" id="color-picker" value="#000000">
+            <input type="text" id="color-hex" value="#000000" maxlength="7">
+        </div>
+
+        <div class="control-group">
+            <button id="btn-save" style="background-color: #007aff; color: white;">Save (PNG)</button>
+            <label for="file-load" class="file-label">Load Image</label>
+            <input type="file" id="file-load" accept="image/*">
+        </div>
+
+        <div class="control-group">
+            <button id="btn-remove">All Remove</button>
+        </div>
+    </div>
+
+    <div id="canvas-container">
+        <canvas id="paint-canvas"></canvas>
+    </div>
+
+    <script>
+        const canvas = document.getElementById('paint-canvas');
+        const ctx = canvas.getContext('2d');
+        const container = document.getElementById('canvas-container');
+
+        // 엘리먼트 참조
+        const btnPen = document.getElementById('btn-pen');
+        const btnEraser = document.getElementById('btn-eraser');
+        const sliderPen = document.getElementById('slider-pen');
+        const sliderEraser = document.getElementById('slider-eraser');
+        const colorPicker = document.getElementById('color-picker');
+        const colorHex = document.getElementById('color-hex');
+        const btnSave = document.getElementById('btn-save');
+        const fileLoad = document.getElementById('file-load');
+        const btnRemove = document.getElementById('btn-remove');
+
+        // 초기 상태 설정
+        let isDrawing = false;
+        let currentMode = 'pen'; // 'pen' 또는 'eraser'
+        let penColor = '#000000';
+        let penSize = 5;
+        let eraserSize = 20;
+
+        // 캔버스 크기 초기화 (컨테이너 크기에 맞춰 적절한 고정 비율 생성)
+        function resizeCanvas() {
+            // 브라우저 리사이즈 시 그림이 깨지지 않도록 초기 1회 또는 필요할 때만 명시적 크기 지정
+            canvas.width = 900;
+            canvas.height = 600;
+            
+            // 캔버스 배경을 흰색으로 초기화 (안 하면 저장 시 배경이 투명해짐)
+            ctx.fillStyle = '#ffffff';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            
+            // 선 기본 스타일
+            ctx.lineCap = 'round';
+            ctx.lineJoin = 'round';
+        }
+        resizeCanvas();
+
+        // 드로잉 로직
+        function startDrawing(e) {
+            isDrawing = true;
+            draw(e); 
+        }
+
+        function stopDrawing() {
+            isDrawing = false;
+            ctx.beginPath(); // 선 경로 초기화
+        }
+
+        function draw(e) {
+            if (!isDrawing) return;
+
+            // 마우스 좌표 계산
+            const rect = canvas.getBoundingClientRect();
+            const x = (e.clientX - rect.left) * (canvas.width / rect.width);
+            const y = (e.clientY - rect.top) * (canvas.height / rect.height);
+
+            ctx.lineWidth = currentMode === 'pen' ? penSize : eraserSize;
+            ctx.strokeStyle = currentMode === 'pen' ? penColor : '#ffffff';
+
+            ctx.lineTo(x, y);
+            ctx.stroke();
+            ctx.beginPath();
+            ctx.moveTo(x, y);
+        }
+
+        // 이벤트 리스너 등록 (마우스)
+        canvas.addEventListener('mousedown', startDrawing);
+        canvas.addEventListener('mousemove', draw);
+        canvas.addEventListener('mouseup', stopDrawing);
+        canvas.addEventListener('mouseleave', stopDrawing);
+
+        // 이벤트 리스너 등록 (터치 스크린 지원)
+        canvas.addEventListener('touchstart', (e) => {
+            const touch = e.touches[0];
+            const mouseEvent = new MouseEvent('mousedown', {
+                clientX: touch.clientX,
+                clientY: touch.clientY
+            });
+            canvas.dispatchEvent(mouseEvent);
+            e.preventDefault();
+        }, { passive: false });
+
+        canvas.addEventListener('touchmove', (e) => {
+            const touch = e.touches[0];
+            const mouseEvent = new MouseEvent('mousemove', {
+                clientX: touch.clientX,
+                clientY: touch.clientY
+            });
+            canvas.dispatchEvent(mouseEvent);
+            e.preventDefault();
+        }, { passive: false });
+
+        canvas.addEventListener('touchend', () => {
+            const mouseEvent = new MouseEvent('mouseup', {});
+            canvas.dispatchEvent(mouseEvent);
+        });
+
+        // 모드 전환 (Pen / Eraser)
+        btnPen.addEventListener('click', () => {
+            currentMode = 'pen';
+            btnPen.classList.add('active');
+            btnEraser.classList.remove('active');
+        });
+
+        btnEraser.addEventListener('click', () => {
+            currentMode = 'eraser';
+            btnEraser.classList.add('active');
+            btnPen.classList.remove('active');
+        });
+
+        // 크기 슬라이더 조절
+        sliderPen.addEventListener('input', (e) => {
+            penSize = e.target.value;
+        });
+
+        sliderEraser.addEventListener('input', (e) => {
+            eraserSize = e.target.value;
+        });
+
+        // 색상 동기화 (색상환 -> Hex)
+        colorPicker.addEventListener('input', (e) => {
+            penColor = e.target.value;
+            colorHex.value = penColor.toUpperCase();
+        });
+
+        // 색상 동기화 (Hex -> 색상환)
+        colorHex.addEventListener('input', (e) => {
+            let code = e.target.value;
+            if(!code.startsWith('#')) {
+                code = '#' + code;
+            }
+            // 올바른 hex 코드 형태일 때만 적용
+            if(/^#[0-9A-F]{6}$/i.test(code)) {
+                penColor = code;
+                colorPicker.value = code;
+            }
+        });
+
+        // 이미지 저장 (PNG)
+        btnSave.addEventListener('click', () => {
+            const link = document.createElement('a');
+            link.download = 'canvas-paint.png';
+            link.href = canvas.toDataURL('image/png');
+            link.click();
+        });
+
+        // 이미지 불러오기 (Canvas 크기에 딱 맞게 Fit)
+        fileLoad.addEventListener('change', (e) => {
+            const file = e.target.files[0];
+            if (!file) return;
+
+            const reader = new FileReader();
+            reader.onload = function(event) {
+                const img = new Image();
+                img.onload = function() {
+                    // 배경 흰색으로 밀어버린 후 비율 맞춰 그리기
+                    ctx.fillStyle = '#ffffff';
+                    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+                    // 캔버스 크기에 fit하게 스케일 계산 (Aspect Ratio 유지)
+                    const hRatio = canvas.width / img.width;
+                    const vRatio = canvas.height / img.height;
+                    const ratio  = Math.min(hRatio, vRatio);
+                    
+                    const centerShift_x = (canvas.width - img.width * ratio) / 2;
+                    const centerShift_y = (canvas.height - img.height * ratio) / 2;  
+
+                    ctx.drawImage(img, 0, 0, img.width, img.height, 
+                                       centerShift_x, centerShift_y, img.width * ratio, img.height * ratio);
+                }
+                img.src = event.target.result;
+            }
+            reader.readAsDataURL(file);
+            // 같은 파일 다시 올려도 트리거되도록 초기화
+            e.target.value = '';
+        });
+
+        // 전체 지우기 (모달 확인)
+        btnRemove.addEventListener('click', () => {
+            const conf = confirm('Are you sure?');
+            if (conf) {
+                ctx.fillStyle = '#ffffff';
+                ctx.fillRect(0, 0, canvas.width, canvas.height);
+            }
+        });
+    </script>
+</body>
+</html>
