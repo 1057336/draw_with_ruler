@@ -280,4 +280,442 @@
             const rect = canvasElement.getBoundingClientRect();
             return {
                 x: (e.clientX - rect.left) * (canvasElement.width / rect.width),
-                y: (e.clientY - rect.top) * (canvasElement.
+                y: (e.clientY - rect.top) * (canvasElement.height / rect.height)
+            };
+        }
+
+        // 모드 전환 통합 관리 함수
+        function changeMode(mode) {
+            currentMode = mode;
+            
+            // 모든 버튼 활성화 클래스 제거
+            btnPen.classList.remove('active');
+            btnEraser.classList.remove('active');
+            btnRuler.classList.remove('active');
+            btnRulerEraser.classList.remove('active');
+
+            // 타겟 버튼만 활성화 및 레이어 조절
+            if (mode === 'pen') btnPen.classList.add('active');
+            if (mode === 'eraser') btnEraser.classList.add('active');
+            if (mode === 'ruler') {
+                btnRuler.classList.add('active');
+                // 룰러 관련 기능을 작동하면 룰러 레이어를 자동으로 켬
+                isRulerVisible = true;
+                btnRulerToggle.classList.add('active');
+                btnRulerToggle.innerText = 'On';
+            }
+            if (mode === 'ruler-eraser') {
+                btnRulerEraser.classList.add('active');
+                isRulerVisible = true;
+                btnRulerToggle.classList.add('active');
+                btnRulerToggle.innerText = 'On';
+            }
+
+            // 룰러 도중에 모드 바꿨을 때 임시 상태 방지 세척
+            if (mode !== 'ruler' && rulerSettingStep === 1) {
+                rulerSettingStep = 0;
+            }
+            renderRulerLayer();
+        }
+
+        // 룰러 안내 텍스트 갱신
+        function updateRulerStatusUI() {
+            if (!isRulerConfigured) {
+                rulerStatus.innerText = "미설정";
+                rulerStatus.style.color = "#ff3b30";
+            } else {
+                rulerStatus.innerText = "설정 완료";
+                rulerStatus.style.color = "#34c759";
+            }
+        }
+
+        /* --- 일반 그림판 드로잉 (하단 레이어) --- */
+        paintCanvas.addEventListener('mousedown', (e) => {
+            if (currentMode !== 'pen' && currentMode !== 'eraser') return;
+            isDrawing = true;
+            const coords = getCanvasCoordinates(e, paintCanvas);
+            pCtx.beginPath();
+            pCtx.moveTo(coords.x, coords.y);
+        });
+
+        paintCanvas.addEventListener('mousemove', (e) => {
+            if (!isDrawing) return;
+            const coords = getCanvasCoordinates(e, paintCanvas);
+            
+            pCtx.lineWidth = currentMode === 'pen' ? penSize : eraserSize;
+            pCtx.strokeStyle = currentMode === 'pen' ? penColor : '#ffffff';
+            
+            pCtx.lineTo(coords.x, coords.y);
+            pCtx.stroke();
+        });
+
+        window.addEventListener('mouseup', () => {
+            isDrawing = false;
+        });
+
+        /* --- 룰러 로직 로직 & 상단 투명 레이어 인터랙션 --- */
+        
+        // 두 점 사이의 픽셀 거리 계산
+        function getDistance(p1, p2) {
+            return Math.sqrt(Math.pow(p2.x - p1.x, 2) + Math.pow(p2.y - p1.y, 2));
+        }
+
+        // 점과 선분 사이의 수직 거리를 구하는 수학 함수 (Eraser 호버용 유격 판정)
+        function getDistanceToLine(pt, lineStart, lineEnd) {
+            const dx = lineEnd.x - lineStart.x;
+            const dy = lineEnd.y - lineStart.y;
+            const l2 = dx * dx + dy * dy;
+            if (l2 === 0) return getDistance(pt, lineStart);
+            
+            let t = ((pt.x - lineStart.x) * dx + (pt.y - lineStart.y) * dy) / l2;
+            t = Math.max(0, Math.min(1, t)); // 선분 범위 내로 제한
+            
+            return getDistance(pt, { x: lineStart.x + t * dx, y: lineStart.y + t * dy });
+        }
+
+        // 상단 룰러 레이어 종합 렌더링 함수
+        function renderRulerLayer() {
+            rCtx.clearRect(0, 0, rulerCanvas.width, rulerCanvas.height);
+            
+            if (!isRulerVisible) return; // 꺼져있으면 렌더링 패스
+
+            // 1. 기존에 이미 그어놓은 자(Ruler) 선들 그리기
+            rulerLines.forEach((line, index) => {
+                const isHovered = (currentMode === 'ruler-eraser' && index === hoveredRulerIndex);
+                
+                // 외곽선 효과 (Ruler Eraser 호버링 시)
+                if (isHovered) {
+                    rCtx.strokeStyle = 'rgba(255, 59, 48, 0.4)';
+                    rCtx.lineWidth = 10;
+                    rCtx.beginPath();
+                    rCtx.moveTo(line.x1, line.y1);
+                    rCtx.lineTo(line.x2, line.y2);
+                    rCtx.stroke();
+                }
+
+                // 본래 자 선 스타일
+                rCtx.strokeStyle = isHovered ? '#ff3b30' : '#4a4a4a';
+                rCtx.lineWidth = 2;
+                rCtx.setLineDash([]);
+                rCtx.beginPath();
+                rCtx.moveTo(line.x1, line.y1);
+                rCtx.lineTo(line.x2, line.y2);
+                rCtx.stroke();
+
+                // 양끝 수직 눈금 단면 가이드
+                drawTicks(line.x1, line.y1, line.x2, line.y2, isHovered ? '#ff3b30' : '#4a4a4a');
+
+                // 거리 텍스트 라벨 출력
+                rCtx.fillStyle = isHovered ? '#ff3b30' : '#000000';
+                rCtx.font = 'bold 12px sans-serif';
+                rCtx.textAlign = 'center';
+                rCtx.textBaseline = 'bottom';
+                
+                const midX = (line.x1 + line.x2) / 2;
+                const midY = (line.y1 + line.y2) / 2;
+                rCtx.fillText(`${line.lengthText} ${line.unit}`, midX, midY - 6);
+            });
+
+            // 2. 룰러 세팅 단계(Calibration) 가이드라인 그리기
+            if (currentMode === 'ruler' && !isRulerConfigured) {
+                if (rulerSettingStep === 1) {
+                    // 기준점 빨간 점
+                    rCtx.fillStyle = '#ff3b30';
+                    rCtx.beginPath();
+                    rCtx.arc(rulerBasePoint.x, rulerBasePoint.y, 5, 0, Math.PI * 2);
+                    rCtx.fill();
+
+                    // 마우스를 따라다니는 임시 가이드 실선
+                    rCtx.strokeStyle = 'rgba(255, 59, 48, 0.6)';
+                    rCtx.lineWidth = 1;
+                    rCtx.beginPath();
+                    rCtx.moveTo(rulerBasePoint.x, rulerBasePoint.y);
+                    rCtx.lineTo(currentMousePos.x, currentMousePos.y);
+                    rCtx.stroke();
+                }
+            }
+
+            // 3. 룰러 세팅 완료 상태에서 새로 자 그릴 때 고무줄(Rubber-banding) 가이드라인
+            if (currentMode === 'ruler' && isRulerConfigured && rulerDrawStart) {
+                rCtx.strokeStyle = '#007aff';
+                rCtx.lineWidth = 2;
+                rCtx.setLineDash([4, 4]); // 점선 유도
+                rCtx.beginPath();
+                rCtx.moveTo(rulerDrawStart.x, rulerDrawStart.y);
+                rCtx.lineTo(currentMousePos.x, currentMousePos.y);
+                rCtx.stroke();
+                rCtx.setLineDash([]);
+
+                // 실시간 변환 거리 미리보기 출력
+                const pxDist = getDistance(rulerDrawStart, currentMousePos);
+                let convertedDist = 0;
+                if (currentRulerUnit === 'mm') {
+                    convertedDist = (pxDist / pxPerMm).toFixed(1);
+                } else {
+                    convertedDist = ((pxDist / pxPerMm) / 25.4).toFixed(2); // mm -> inch 변환
+                }
+
+                rCtx.fillStyle = '#007aff';
+                rCtx.font = '12px sans-serif';
+                rCtx.fillText(`${convertedDist} ${currentRulerUnit}`, currentMousePos.x, currentMousePos.y - 10);
+            }
+        }
+
+        // 자 모양 양끝 디테일 데코레이션 함수
+        function drawTicks(x1, y1, x2, y2, color) {
+            const angle = Math.atan2(y2 - y1, x2 - x1);
+            const tickLength = 6;
+            
+            rCtx.strokeStyle = color;
+            rCtx.lineWidth = 2;
+
+            // 시작점 수직선
+            rCtx.beginPath();
+            rCtx.moveTo(x1 - Math.sin(angle) * tickLength, y1 + Math.cos(angle) * tickLength);
+            rCtx.lineTo(x1 + Math.sin(angle) * tickLength, y1 - Math.cos(angle) * tickLength);
+            rCtx.stroke();
+
+            // 끝점 수직선
+            rCtx.beginPath();
+            rCtx.moveTo(x2 - Math.sin(angle) * tickLength, y2 + Math.cos(angle) * tickLength);
+            rCtx.lineTo(x2 + Math.sin(angle) * tickLength, y2 - Math.cos(angle) * tickLength);
+            rCtx.stroke();
+        }
+
+        // 상단 룰러 캔버스 마우스 이동 이벤트
+        rulerCanvas.addEventListener('mousemove', (e) => {
+            const coords = getCanvasCoordinates(e, rulerCanvas);
+            currentMousePos = coords;
+
+            if (currentMode === 'ruler') {
+                // 세팅 가이드 중이거나, 실제 자 긋는 중이면 화면 갱신
+                if (rulerSettingStep === 1 || rulerDrawStart) {
+                    renderRulerLayer();
+                }
+            } 
+            else if (currentMode === 'ruler-eraser') {
+                // 지우개 모드 시 마우스와 가장 가까운 자 선분 추적
+                let minDest = 999999;
+                let targetIdx = null;
+                const hoverTolerance = 8; // 8픽셀 유격 허용 범위
+
+                rulerLines.forEach((line, idx) => {
+                    const dist = getDistanceToLine(coords, {x: line.x1, y: line.y1}, {x: line.x2, y: line.y2});
+                    if (dist < minDest) {
+                        minDest = dist;
+                        targetIdx = idx;
+                    }
+                });
+
+                if (minDest <= hoverTolerance) {
+                    if (hoveredRulerIndex !== targetIdx) {
+                        hoveredRulerIndex = targetIdx;
+                        renderRulerLayer();
+                    }
+                } else {
+                    if (hoveredRulerIndex !== null) {
+                        hoveredRulerIndex = null;
+                        renderRulerLayer();
+                    }
+                }
+            }
+        });
+
+        // 상단 룰러 캔버스 클릭(마우스 다운) 시 핵심 비즈니스 로직 처리
+        rulerCanvas.addEventListener('mousedown', (e) => {
+            const coords = getCanvasCoordinates(e, rulerCanvas);
+
+            // [A] 룰러 모드일 때
+            if (currentMode === 'ruler') {
+                // STEP 1 : 아직 룰러 눈금 규격 세팅을 하지 않은 경우
+                if (!isRulerConfigured) {
+                    if (rulerSettingStep === 0) {
+                        rulerBasePoint = coords;
+                        rulerSettingStep = 1;
+                        renderRulerLayer();
+                    } 
+                    else if (rulerSettingStep === 1) {
+                        const pixelDist = getDistance(rulerBasePoint, coords);
+                        if(pixelDist === 0) return; // 제자리 클릭 방어
+
+                        // 입력창 활성화 팝업
+                        const unitChoice = prompt("단위를 선택하고 실제 수치를 입력하세요.\n단위 선택 입력 (mm / inch / cm) :", "mm");
+                        if (!unitChoice) { rulerSettingStep = 0; renderRulerLayer(); return; }
+
+                        const cleanUnit = unitChoice.trim().toLowerCase();
+                        if (cleanUnit !== 'mm' && cleanUnit !== 'inch' && cleanUnit !== 'cm') {
+                            alert("잘못된 단위입니다. mm, inch, cm 중 하나를 입력하세요.");
+                            rulerSettingStep = 0;
+                            renderRulerLayer();
+                            return;
+                        }
+
+                        const rawValue = prompt(`선택한 [ ${cleanUnit} ] 기준, 그은 선의 실제 길이를 숫자로 입력하세요:`, "10");
+                        const numValue = parseFloat(rawValue);
+                        if (isNaN(numValue) || numValue <= 0) {
+                            alert("올바른 숫자가 아닙니다. 처음부터 다시 시도하십시오.");
+                            rulerSettingStep = 0;
+                            renderRulerLayer();
+                            return;
+                        }
+
+                        // 입력 받은 단위를 내부 시스템 기저 표준단위(mm)로 완벽 통합 연산
+                        let mmLength = 0;
+                        if (cleanUnit === 'mm') mmLength = numValue;
+                        else if (cleanUnit === 'cm') mmLength = numValue * 10;
+                        else if (cleanUnit === 'inch') mmLength = numValue * 25.4;
+
+                        // 최종 변환 비율 상수 도출 (1mm당 몇 내부픽셀 인가)
+                        pxPerMm = pixelDist / mmLength;
+                        isRulerConfigured = true;
+                        rulerSettingStep = 0;
+                        updateRulerStatusUI();
+                        alert("룰러 세팅 완료! 이제 자를 그릴 수 있습니다.");
+                        renderRulerLayer();
+                    }
+                } 
+                // STEP 2 : 세팅이 완료되어 실제로 측정용 자를 그리는 타이밍
+                else {
+                    if (!rulerDrawStart) {
+                        rulerDrawStart = coords;
+                    } else {
+                        const pxDist = getDistance(rulerDrawStart, coords);
+                        if (pxDist > 2) { // 오클릭 유격 처리
+                            let lengthText = "";
+                            if (currentRulerUnit === 'mm') {
+                                lengthText = (pxDist / pxPerMm).toFixed(1);
+                            } else {
+                                lengthText = ((pxDist / pxPerMm) / 25.4).toFixed(2);
+                            }
+
+                            // 신규 자 객체 구조 생성 보관
+                            rulerLines.push({
+                                x1: rulerDrawStart.x,
+                                y1: rulerDrawStart.y,
+                                x2: coords.x,
+                                y2: coords.y,
+                                lengthText: lengthText,
+                                unit: currentRulerUnit
+                            });
+                        }
+                        rulerDrawStart = null;
+                        renderRulerLayer();
+                    }
+                }
+            } 
+            // [B] 룰러 지우개 모드일 때 클릭 시 제거 판정
+            else if (currentMode === 'ruler-eraser') {
+                if (hoveredRulerIndex !== null) {
+                    rulerLines.splice(hoveredRulerIndex, 1);
+                    hoveredRulerIndex = null;
+                    renderRulerLayer();
+                }
+            }
+        });
+
+        /* --- 툴바 버튼 이벤트 바인딩 --- */
+
+        btnPen.addEventListener('click', () => changeMode('pen'));
+        btnEraser.addEventListener('click', () => changeMode('eraser'));
+        btnRuler.addEventListener('click', () => changeMode('ruler'));
+        btnRulerEraser.addEventListener('click', () => changeMode('ruler-eraser'));
+
+        // 룰러 보이기 토글 스위치 (On / Off)
+        btnRulerToggle.addEventListener('click', () => {
+            isRulerVisible = !isRulerVisible;
+            if (isRulerVisible) {
+                btnRulerToggle.classList.add('active');
+                btnRulerToggle.innerText = 'On';
+            } else {
+                btnRulerToggle.classList.remove('active');
+                btnRulerToggle.innerText = 'Off';
+            }
+            renderRulerLayer();
+        });
+
+        // 새로 그릴 자 단위 변환 토글 단추 (mm <-> inch)
+        btnRulerUnit.addEventListener('click', () => {
+            if (currentRulerUnit === 'mm') {
+                currentRulerUnit = 'inch';
+                btnRulerUnit.innerText = 'inch';
+            } else {
+                currentRulerUnit = 'mm';
+                btnRulerUnit.innerText = 'mm';
+            }
+        });
+
+        // 룰러 캘리브레이션 초기화 리셋 단추
+        btnRulerReset.addEventListener('click', () => {
+            isRulerConfigured = false;
+            rulerSettingStep = 0;
+            rulerDrawStart = null;
+            pxPerMm = 0;
+            updateRulerStatusUI();
+            alert("룰러 기준 단위 세팅이 초기화되었습니다. Ruler 버튼을 눌러 다시 설정해 주세요.");
+            renderRulerLayer();
+        });
+
+        // 기존 그림판 기능 연동 (슬라이더, 컬러, 세이브, 로드)
+        sliderPen.addEventListener('input', (e) => penSize = e.target.value);
+        sliderEraser.addEventListener('input', (e) => eraserSize = e.target.value);
+        
+        colorPicker.addEventListener('input', (e) => {
+            penColor = e.target.value;
+            colorHex.value = penColor.toUpperCase();
+        });
+
+        colorHex.addEventListener('input', (e) => {
+            let code = e.target.value;
+            if(!code.startsWith('#')) code = '#' + code;
+            if(/^#[0-9A-F]{6}$/i.test(code)) {
+                penColor = code;
+                colorPicker.value = code;
+            }
+        });
+
+        // 그림판 저장 (하단 도화지)
+        btnSave.addEventListener('click', () => {
+            const link = document.createElement('a');
+            link.download = 'canvas-paint.png';
+            link.href = paintCanvas.toDataURL('image/png');
+            link.click();
+        });
+
+        // 그림판 로드 (하단 도화지에 꽉 차게 피팅)
+        fileLoad.addEventListener('change', (e) => {
+            const file = e.target.files[0];
+            if (!file) return;
+            const reader = new FileReader();
+            reader.onload = function(event) {
+                const img = new Image();
+                img.onload = function() {
+                    pCtx.fillStyle = '#ffffff';
+                    pCtx.fillRect(0, 0, paintCanvas.width, paintCanvas.height);
+                    const hRatio = paintCanvas.width / img.width;
+                    const vRatio = paintCanvas.height / img.height;
+                    const ratio  = Math.min(hRatio, vRatio);
+                    const centerShift_x = (paintCanvas.width - img.width * ratio) / 2;
+                    const centerShift_y = (paintCanvas.height - img.height * ratio) / 2;  
+                    pCtx.drawImage(img, 0, 0, img.width, img.height, 
+                                       centerShift_x, centerShift_y, img.width * ratio, img.height * ratio);
+                }
+                img.src = event.target.result;
+            }
+            reader.readAsDataURL(file);
+            e.target.value = '';
+        });
+
+        // 전체 초기화 (경고 창)
+        btnRemove.addEventListener('click', () => {
+            if (confirm('Are you sure?')) {
+                // 그림 레이어 초기화
+                pCtx.fillStyle = '#ffffff';
+                pCtx.fillRect(0, 0, paintCanvas.width, paintCanvas.height);
+                // 룰러 레이어선 전부 파괴
+                rulerLines = [];
+                renderRulerLayer();
+            }
+        });
+    </script>
+</body>
+</html>
