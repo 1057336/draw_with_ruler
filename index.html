@@ -1,6 +1,7 @@
 <!DOCTYPE html>
 <html lang="ko">
-<head> 
+
+<head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Web Canvas Paint with Ruler Layer</title>
@@ -142,7 +143,7 @@
             position: relative;
             width: 900px;
             height: 600px;
-            box-shadow: 0 10px 25px rgba(0,0,0,0.1);
+            box-shadow: 0 10px 25px rgba(0, 0, 0, 0.1);
             border-radius: 8px;
             overflow: hidden;
         }
@@ -163,11 +164,14 @@
 
         #ruler-canvas {
             background-color: transparent;
-            z-index: 2; /* 룰러 레이어가 항상 위에 오도록 배치 */
+            z-index: 2;
             cursor: crosshair;
+            pointer-events: none;
+            /* 마우스 이벤트가 하단 그림판으로 통과하도록 설정 */
         }
     </style>
 </head>
+
 <body>
 
     <div id="toolbar">
@@ -249,11 +253,11 @@
         let eraserSize = 20;
 
         // 룰러 관련 상태 시스템
-        let isRulerConfigured = false; 
+        let isRulerConfigured = false;
         let rulerSettingStep = 0; // 0: 시작전, 1: 기준점 찍음
         let rulerBasePoint = { x: 0, y: 0 };
         let pxPerMm = 0; // 1mm당 할당할 내부 픽셀 상수값
-        
+
         let isRulerVisible = true;
         let currentRulerUnit = 'mm'; // 'mm' 또는 'inch'
         let rulerLines = []; // 저장될 자(ruler) 객체들의 배열 [{x1, y1, x2, y2, lengthText, unit}]
@@ -285,9 +289,10 @@
         }
 
         // 모드 전환 통합 관리 함수
+        // 모드 전환 통합 관리 함수 (수정본)
         function changeMode(mode) {
             currentMode = mode;
-            
+
             // 모든 버튼 활성화 클래스 제거
             btnPen.classList.remove('active');
             btnEraser.classList.remove('active');
@@ -295,17 +300,26 @@
             btnRulerEraser.classList.remove('active');
 
             // 타겟 버튼만 활성화 및 레이어 조절
-            if (mode === 'pen') btnPen.classList.add('active');
-            if (mode === 'eraser') btnEraser.classList.add('active');
+            if (mode === 'pen') {
+                btnPen.classList.add('active');
+                rulerCanvas.style.pointerEvents = 'none'; // 펜 모드일 땐 마우스 통과
+            }
+            if (mode === 'eraser') {
+                btnEraser.classList.add('active');
+                rulerCanvas.style.pointerEvents = 'none'; // 지우개 모드일 땐 마우스 통과
+            }
             if (mode === 'ruler') {
                 btnRuler.classList.add('active');
-                // 룰러 관련 기능을 작동하면 룰러 레이어를 자동으로 켬
+                rulerCanvas.style.pointerEvents = 'auto'; // 룰러 그릴 땐 마우스 잡기
+
                 isRulerVisible = true;
                 btnRulerToggle.classList.add('active');
                 btnRulerToggle.innerText = 'On';
             }
             if (mode === 'ruler-eraser') {
                 btnRulerEraser.classList.add('active');
+                rulerCanvas.style.pointerEvents = 'auto'; // 룰러 지울 땐 마우스 잡기
+
                 isRulerVisible = true;
                 btnRulerToggle.classList.add('active');
                 btnRulerToggle.innerText = 'On';
@@ -341,10 +355,10 @@
         paintCanvas.addEventListener('mousemove', (e) => {
             if (!isDrawing) return;
             const coords = getCanvasCoordinates(e, paintCanvas);
-            
+
             pCtx.lineWidth = currentMode === 'pen' ? penSize : eraserSize;
             pCtx.strokeStyle = currentMode === 'pen' ? penColor : '#ffffff';
-            
+
             pCtx.lineTo(coords.x, coords.y);
             pCtx.stroke();
         });
@@ -354,7 +368,7 @@
         });
 
         /* --- 룰러 로직 로직 & 상단 투명 레이어 인터랙션 --- */
-        
+
         // 두 점 사이의 픽셀 거리 계산
         function getDistance(p1, p2) {
             return Math.sqrt(Math.pow(p2.x - p1.x, 2) + Math.pow(p2.y - p1.y, 2));
@@ -366,23 +380,23 @@
             const dy = lineEnd.y - lineStart.y;
             const l2 = dx * dx + dy * dy;
             if (l2 === 0) return getDistance(pt, lineStart);
-            
+
             let t = ((pt.x - lineStart.x) * dx + (pt.y - lineStart.y) * dy) / l2;
             t = Math.max(0, Math.min(1, t)); // 선분 범위 내로 제한
-            
+
             return getDistance(pt, { x: lineStart.x + t * dx, y: lineStart.y + t * dy });
         }
 
         // 상단 룰러 레이어 종합 렌더링 함수
         function renderRulerLayer() {
             rCtx.clearRect(0, 0, rulerCanvas.width, rulerCanvas.height);
-            
+
             if (!isRulerVisible) return; // 꺼져있으면 렌더링 패스
 
             // 1. 기존에 이미 그어놓은 자(Ruler) 선들 그리기
             rulerLines.forEach((line, index) => {
                 const isHovered = (currentMode === 'ruler-eraser' && index === hoveredRulerIndex);
-                
+
                 // 외곽선 효과 (Ruler Eraser 호버링 시)
                 if (isHovered) {
                     rCtx.strokeStyle = 'rgba(255, 59, 48, 0.4)';
@@ -410,7 +424,7 @@
                 rCtx.font = 'bold 12px sans-serif';
                 rCtx.textAlign = 'center';
                 rCtx.textBaseline = 'bottom';
-                
+
                 const midX = (line.x1 + line.x2) / 2;
                 const midY = (line.y1 + line.y2) / 2;
                 rCtx.fillText(`${line.lengthText} ${line.unit}`, midX, midY - 6);
@@ -465,7 +479,7 @@
         function drawTicks(x1, y1, x2, y2, color) {
             const angle = Math.atan2(y2 - y1, x2 - x1);
             const tickLength = 6;
-            
+
             rCtx.strokeStyle = color;
             rCtx.lineWidth = 2;
 
@@ -492,7 +506,7 @@
                 if (rulerSettingStep === 1 || rulerDrawStart) {
                     renderRulerLayer();
                 }
-            } 
+            }
             else if (currentMode === 'ruler-eraser') {
                 // 지우개 모드 시 마우스와 가장 가까운 자 선분 추적
                 let minDest = 999999;
@@ -500,7 +514,7 @@
                 const hoverTolerance = 8; // 8픽셀 유격 허용 범위
 
                 rulerLines.forEach((line, idx) => {
-                    const dist = getDistanceToLine(coords, {x: line.x1, y: line.y1}, {x: line.x2, y: line.y2});
+                    const dist = getDistanceToLine(coords, { x: line.x1, y: line.y1 }, { x: line.x2, y: line.y2 });
                     if (dist < minDest) {
                         minDest = dist;
                         targetIdx = idx;
@@ -533,10 +547,10 @@
                         rulerBasePoint = coords;
                         rulerSettingStep = 1;
                         renderRulerLayer();
-                    } 
+                    }
                     else if (rulerSettingStep === 1) {
                         const pixelDist = getDistance(rulerBasePoint, coords);
-                        if(pixelDist === 0) return; // 제자리 클릭 방어
+                        if (pixelDist === 0) return; // 제자리 클릭 방어
 
                         // 입력창 활성화 팝업
                         const unitChoice = prompt("단위를 선택하고 실제 수치를 입력하세요.\n단위 선택 입력 (mm / inch / cm) :", "mm");
@@ -573,7 +587,7 @@
                         alert("룰러 세팅 완료! 이제 자를 그릴 수 있습니다.");
                         renderRulerLayer();
                     }
-                } 
+                }
                 // STEP 2 : 세팅이 완료되어 실제로 측정용 자를 그리는 타이밍
                 else {
                     if (!rulerDrawStart) {
@@ -602,7 +616,7 @@
                         renderRulerLayer();
                     }
                 }
-            } 
+            }
             // [B] 룰러 지우개 모드일 때 클릭 시 제거 판정
             else if (currentMode === 'ruler-eraser') {
                 if (hoveredRulerIndex !== null) {
@@ -658,7 +672,7 @@
         // 기존 그림판 기능 연동 (슬라이더, 컬러, 세이브, 로드)
         sliderPen.addEventListener('input', (e) => penSize = e.target.value);
         sliderEraser.addEventListener('input', (e) => eraserSize = e.target.value);
-        
+
         colorPicker.addEventListener('input', (e) => {
             penColor = e.target.value;
             colorHex.value = penColor.toUpperCase();
@@ -666,8 +680,8 @@
 
         colorHex.addEventListener('input', (e) => {
             let code = e.target.value;
-            if(!code.startsWith('#')) code = '#' + code;
-            if(/^#[0-9A-F]{6}$/i.test(code)) {
+            if (!code.startsWith('#')) code = '#' + code;
+            if (/^#[0-9A-F]{6}$/i.test(code)) {
                 penColor = code;
                 colorPicker.value = code;
             }
@@ -686,18 +700,18 @@
             const file = e.target.files[0];
             if (!file) return;
             const reader = new FileReader();
-            reader.onload = function(event) {
+            reader.onload = function (event) {
                 const img = new Image();
-                img.onload = function() {
+                img.onload = function () {
                     pCtx.fillStyle = '#ffffff';
                     pCtx.fillRect(0, 0, paintCanvas.width, paintCanvas.height);
                     const hRatio = paintCanvas.width / img.width;
                     const vRatio = paintCanvas.height / img.height;
-                    const ratio  = Math.min(hRatio, vRatio);
+                    const ratio = Math.min(hRatio, vRatio);
                     const centerShift_x = (paintCanvas.width - img.width * ratio) / 2;
-                    const centerShift_y = (paintCanvas.height - img.height * ratio) / 2;  
-                    pCtx.drawImage(img, 0, 0, img.width, img.height, 
-                                       centerShift_x, centerShift_y, img.width * ratio, img.height * ratio);
+                    const centerShift_y = (paintCanvas.height - img.height * ratio) / 2;
+                    pCtx.drawImage(img, 0, 0, img.width, img.height,
+                        centerShift_x, centerShift_y, img.width * ratio, img.height * ratio);
                 }
                 img.src = event.target.result;
             }
@@ -718,4 +732,5 @@
         });
     </script>
 </body>
+
 </html>
